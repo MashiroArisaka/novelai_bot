@@ -18,11 +18,11 @@ pip3 install -U requests[socks] pyTelegramBotAPI
 运行用法：
 python3 novelai_bot.py [参数(naifu|webui|file)] [你的naifu/webui网址]
 
-列子：搭建 naifu bot，naifu地址是 'http://127.0.0.1:6969'，同时会发送图片+文件
-python3 novelai_bot.py naifu 'http://127.0.0.1:6969'
+列子：搭建 naifu bot，naifu地址是 "http://127.0.0.1:6969"，同时会发送图片+文件
+python3 novelai_bot.py naifu "http://127.0.0.1:6969"
 
-列子：搭建 webui bot，webui地址是 'http://127.0.0.1:7890'，只发文件
-python3 novelai_bot.py webui file 'http://127.0.0.1:7890'
+列子：搭建 webui bot，webui地址是 "http://127.0.0.1:7860"，只发文件
+python3 novelai_bot.py webui file "http://127.0.0.1:7860"
 
 列子：搭建 novelai官网 bot （需要修改添加自己账号的Bearer token）
 python3 novelai_bot.py
@@ -46,7 +46,7 @@ group_id = ['-1001843728291', '-1234']
 to_group_text = '请移动到隔壁测试群 https://t.me/xxx'
 
 #Negative prompt 负面tag，自带鲨扶她伪娘tag，按需修改
-Negative = f'lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, ' \
+Negative_default = f'lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, ' \
           f'low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, bad feet, futa, futanari, yaoi'
 
 #是否使用SOCKS5代理，按需修改自行开启和端口
@@ -65,7 +65,9 @@ help_text = '''
 <code>/ai_sfw_l</code> 是生成横向图(全年龄)
 
 —可选参数
-消息带上 <code>-seed=数字</code> 来指定seeds数
+消息带上 <code>-seed=</code><code>数字</code> | 来指定seeds数
+消息带上 <code>Negative prompt:</code> <code>想指定Negative prompt</code> | 来完全指定Negative prompt
+消息带上 <code>###</code> <code>追加的Negative prompt</code> | 来追加Negative prompt
 
 例如我想ru张兽耳萝莉图(纵向)
 <code>/ai_nsfw_p loli, animal_ears</code>
@@ -117,7 +119,7 @@ def session_for_src_addr(addr: str) -> requests.Session:
 
     return session
 
-def get(input, type, seed, novelai_api_url):
+def get(input, type, seed, novelai_api_url, Negative):
     if 'l' in type :
         width, height = 768, 512
     else:
@@ -198,30 +200,11 @@ def get(input, type, seed, novelai_api_url):
                 'steps': 28,
                 'seed': seed,
                 'n_samples': 1,
-                # 'strength': 0.7,
-                # 'noise': 0.2,
-                'ucPreset': 0,
-                'uc': Negative,
-            },
-        }
-
-        json_data = {
-            'input': input,
-            'model': model,
-            'parameters': {
-                'width': width,
-                'height': height,
-                'scale': 11,
-                'sampler': 'k_euler_ancestral',
-                'steps': 28,
-                'seed': seed,
-                'n_samples': 1,
                 'ucPreset': 0,
                 'qualityToggle': True,
                 'uc': Negative,
             },
         }
-
 
 
     if 'naifu' in argv :
@@ -248,7 +231,7 @@ def get(input, type, seed, novelai_api_url):
         data = response.text
         img_data_b = base64.decodebytes(img_data)
 
-    return data, img_data_b, sum
+    return data, img_data_b
 
 
 
@@ -309,6 +292,31 @@ def send(message):
 
                 message_text = message_text.replace(f'{bot_name}', '').replace(f'/{name}', '').replace('\n', ',').replace(', ,', ',').replace(',,', ',')
 
+                Negative = None
+                Negative_add = ''
+                Negative_l = ['Negative prompt:', 'Negative-prompt:', 'Negative_prompt:', 'Negativeprompt:',
+                              'Negative prompt', 'Negative-prompt', 'Negative_prompt', 'Negativeprompt',
+                              'negative prompt:', 'negative-prompt:', 'negative_prompt:', 'negativeprompt:',
+                              'negative prompt', 'negative-prompt', 'negative_prompt', 'negativeprompt',
+                              ]
+
+                if 'Negative' in message_text or 'negative' in message_text:
+                    message_text = message_text.replace(',Negative', 'Negative').replace(',negative', 'negative')
+                    for i in Negative_l:
+                        if i in message_text:
+                            x = message_text.split(i)
+                            message_text = x[0].strip()
+                            Negative = x[-1].replace(' :', '').replace('：', '').strip()
+                            print(f'Negative --- {Negative}')
+                            break
+
+                if '###' in message_text:
+                    x = message_text.split('###')
+                    message_text = x[0].strip()
+                    Negative_add = x[-1].strip()
+                    Negative_add = f',{Negative_add}'
+                    print(f'Negative_add --- {Negative_add}')
+
                 if '-seed=' in message_text :
                     seed_txt = re.compile(r'-seed=\d*').findall(message_text)[-1]
                     seed_txt = str(seed_txt)
@@ -329,23 +337,26 @@ def send(message):
 
                 print(f'input --- {input}')
 
+                if not Negative:
+                    Negative = f'{Negative_default}{Negative_add}'
+
                 if input :
                     try:
                         start = time.time()
 
                         try:
-                            data, img_data_b, sum = get(input, type, seed, novelai_api_url)
+                            data, img_data_b = get(input, type, seed, novelai_api_url, Negative)
                         except Exception as ex:
                             traceback.print_exc()
                             print('---获取失败1次-等待5秒重试---')
                             try:
                                 time.sleep(5)
-                                data, img_data_b, sum = get(input, type, seed, novelai_api_url)
+                                data, img_data_b = get(input, type, seed, novelai_api_url, Negative)
                             except Exception as ex:
                                 print('---获取失败2次-等待5秒重试---')
                                 try:
                                     time.sleep(5)
-                                    data, img_data_b, sum = get(input, type, seed, novelai_api_url)
+                                    data, img_data_b = get(input, type, seed, novelai_api_url, Negative)
                                 except Exception as ex:
                                     start = time.time()
                                     try:
